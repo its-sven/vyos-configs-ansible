@@ -1,0 +1,6 @@
+remote_config_path: /config/config.boot
+local_config_dir: "../configs-exported"
+set_config_dir: "../setfiles"
+
+ansible_ssh_port: 9999
+ansible_network_os: vyos

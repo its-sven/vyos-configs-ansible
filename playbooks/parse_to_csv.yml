@@ -1,0 +1,62 @@
+---
+
+# 1) Einzelne Firewall‑Chains prüfen 
+- name: Check WAN_IN for {{ router }}
+  set_fact:
+    wan_in: >-
+      {% if (raw | regex_findall('^set firewall ipv4 name WAN_IN ', multiline=True)) | length > 0 %}1{% else %}0{% endif %}
+
+- name: Check WAN_OUT for {{ router }}
+  set_fact:
+    wan_out: >-
+      {% if (raw | regex_findall('^set firewall ipv4 name WAN_OUT ', multiline=True)) | length > 0 %}1{% else %}0{% endif %}
+
+- name: Check WAN_LOCAL for {{ router }}
+  set_fact:
+    wan_local: >-
+      {% if (raw | regex_findall('^set firewall ipv4 name WAN_LOCAL ', multiline=True)) | length > 0 %}1{% else %}0{% endif %}
+
+# 2) VPN‑Konfiguration prüfen
+- name: Check VPN configuration for {{ router }}
+  set_fact:
+    vpn: >-
+      {% if (raw | regex_findall('^set vpn ', multiline=True)) | length > 0 %}1{% else %}0{% endif %}
+
+# 3) Custom Interfaces außer eth0/1/2
+- name: Detect custom interfaces for {{ router }}
+  set_fact:
+    interface_ausser_eth: >-
+      {% set ifaces = raw | regex_findall('^set interfaces ethernet ([^ ]+)', multiline=True) %}
+      {% set extras = ifaces | reject('in', ['eth0','eth1','eth2']) | list %}
+      {% if extras | length > 0 %}1{% else %}0{% endif %}
+
+# 4) IP‑Adressen auslesen
+- name: Extract IPs for {{ router }}
+  set_fact:
+    ip_eth0: "{{ raw | regex_findall(\"^set interfaces ethernet eth0 address '([^']+)'\", multiline=True) | join(';') }}"
+    ip_eth1: "{{ raw | regex_findall(\"^set interfaces ethernet eth1 address '([^']+)'\", multiline=True) | join(';') }}"
+    ip_eth2: "{{ raw | regex_findall(\"^set interfaces ethernet eth2 address '([^']+)'\", multiline=True) | join(';') }}"
+    ip_loopback: "{{ raw | regex_findall(\"^set interfaces loopback lo address '([^']+)'\", multiline=True) | join(';') }}"
+
+# 5) NAT‑Regeln sammeln
+- name: Collect NAT rules for {{ router }}
+  set_fact:
+    nat: >-
+      {{ raw
+         | regex_findall('^set nat .+', multiline=True)
+         | map('regex_replace', ',', ';')
+         | join(' | ')
+      }}
+
+# 9) CSV‑Zeile schreiben
+- name: Append CSV line for {{ router }}
+  lineinfile:
+    path: "{{ report_path }}"
+    insertafter: EOF
+    line: >-
+      {{ router }},
+      {{ wan_in }},{{ wan_out }},{{ wan_local }},
+      {{ vpn }},
+      {{ interface_ausser_eth }},
+      {{ ip_eth0 }},{{ ip_eth1 }},{{ ip_eth2 }},{{ ip_loopback }},
+      "{{ nat }}"

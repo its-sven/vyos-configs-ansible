@@ -1,0 +1,51 @@
+---
+- name: Exportiere VYOS-Konfiguration
+  hosts: all
+  become: true
+  gather_facts: false
+  vars_files:
+    - ../group_vars/all.yml
+
+  tasks:
+        
+
+    - name: backup Config
+      vyos.vyos.vyos_config:
+        backup: true
+        backup_options:
+          filename: "{{inventory_hostname}}-set.cfg"
+          dir_path: ./setfiles-exported/{{inventory_hostname}}
+      connection: network_cli
+
+    # - name: Pull Config #entfernt wegen alter Python version manscher vyatta instanzen
+    #   ansible.builtin.fetch:
+    #     src: /config/config.boot
+    #     dest: ../configs-exported/
+
+    - name: Stelle sicher, dass Zielordner existiert
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../configs-exported/{{ inventory_hostname }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      become: false
+
+    # - name: Datei erstellen falls noch nicht vorhanden
+    #   ansible.builtin.file:
+    #     path: "{{ playbook_dir }}/../configs-exported/{{ inventory_hostname }}/{{ inventory_hostname }}.boot"
+    #     state: touch
+    #     mode: u+rw,g-wx,o-rwx
+    #     modification_time: preserve
+    #     access_time: preserve
+    #   delegate_to: localhost
+    #   become: false
+
+    - name: Pull Config mit SCP ins Zielverzeichnis
+      ansible.builtin.command: >
+        sshpass -p '{{ ansible_ssh_pass }}'
+        scp -P {{ ansible_ssh_port }}
+        {{ ansible_ssh_user }}@{{ ansible_ssh_host }}:/config/config.boot
+        {{ playbook_dir }}/../configs-exported/{{ inventory_hostname }}/{{ inventory_hostname }}.boot
+      delegate_to: localhost
+      become: false
+

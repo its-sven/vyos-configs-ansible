@@ -1,0 +1,44 @@
+---
+- name: Parse migrated configs via file lookup
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    report_path: "{{ playbook_dir }}/../report.csv"
+    search_dir: "{{ playbook_dir }}/../setfiles-migrated"
+    chains:
+      - WAN_IN
+      - WAN_OUT
+      - WAN_LOCAL
+      - VPN
+
+  tasks:
+    - name: Remove old report (falls vorhanden)
+      file:
+        path: "{{ report_path }}"
+        state: absent
+
+    - name: Write CSV header
+      copy:
+        dest: "{{ report_path }}"
+        content: |
+          Routername,WAN_IN,WAN_OUT,WAN_LOCAL,VPN,interface_ausser_eth,IP_eth0,IP_eth1,IP_eth2,IP_loopback,NAT
+        mode: '0644'
+
+    - name: Find all migrated set‑files
+      find:
+        paths: "{{ search_dir }}"
+        patterns: "*-set.cfg"
+        recurse: yes
+      register: found
+
+    - name: Process each routerconfig
+      include_tasks: parse_to_csv.yml
+      loop: "{{ found.files }}"
+      loop_control:
+        loop_var: cfg_file
+        label: "{{ cfg_file.path }}"
+      vars:
+        raw: "{{ lookup('file', cfg_file.path) }}"
+        router: "{{ cfg_file.path | basename | regex_replace('-set\\.cfg$', '') }}"

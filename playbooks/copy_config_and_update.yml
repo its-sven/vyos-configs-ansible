@@ -1,0 +1,146 @@
+---
+# ==============================================================================
+# Play 1: ALLE Konfigurationsdateien finden und auf den Ziel-Host kopieren
+# - Findet ALLE .cfg-Dateien im lokalen Ordner /setfiles-exported.
+# - Erstellt das Zielverzeichnis auf dem Host a000000-1-r-sw.
+# - Kopiert die Dateien auf diesen einen Host.
+# ==============================================================================
+- name: "Play 1/3: ALLE Konfigurationsdateien auf Ziel-Host kopieren"
+  hosts: migrating-host
+  connection: ssh
+  port: 9999
+  gather_facts: false
+  become: false
+
+  tasks:
+    - name: "1.1: ALLE lokalen config.boot-Dateien im Ordner /configs-exported finden"
+      ansible.builtin.find:
+        paths: "{{ playbook_dir }}/../configs-exported/"
+        patterns: "*.boot"
+        recurse: yes
+      delegate_to: localhost
+      register: found_all_config_files
+
+    - name: "DEBUG: Gefundene Dateipfade anzeigen (zur Überprüfung)"
+      debug:
+        msg: "Found paths: {{ found_all_config_files.files | map(attribute='path') | list }}"
+      delegate_to: localhost 
+
+
+    - name: "1.2: Liste der Hostnamen aus Pfaden extrahieren (aus Dateinamen)"
+      set_fact:
+        config_files_to_migrate: >-
+          {{ found_all_config_files.files |
+            map(attribute='path') |
+            map('regex_replace', '.*/configs-exported/([^/]+)/.*', '\g<1>.boot') |
+            list }}
+
+
+    - name: "DEBUG: Extrahierte Hostnamen anzeigen (zur Überprüfung)"
+      debug:
+        msg: "Extracted hostnames: {{ config_files_to_migrate }}"
+      delegate_to: localhost
+
+
+    - name: "1.3: Sicherstellen, dass das Zielverzeichnis /opt/configs existiert"
+      ansible.builtin.file:
+        path: /opt/configs
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: "1.4: Alle config.boot-Dateien auf dem Ziel-Host nach /opt/configs/<router-name>.boot kopieren"
+      ansible.builtin.copy:
+        src: "{{ item.path }}" 
+        dest: "/opt/configs/{{ item.path | basename }}"
+        mode: '0644'
+      loop: "{{ found_all_config_files.files }}" 
+      when: found_all_config_files.files | length > 0
+      become: true
+
+# ==============================================================================
+# Play 2: Konfigurations-Migration auf dem VyOS-Gerät via Network CLI
+# - Führt für jede kopierte Datei das Migrationsskript aus.
+# ==============================================================================
+- name: "Play 2/3: Konfigurations-Migration auf migrating-host durchführen"
+  hosts: migrating-host
+  connection: ssh
+  port: 9999
+  gather_facts: false
+  vars:
+    ansible_network_os: vyos.vyos.vyos
+
+  tasks:
+
+    - name: "2.1: Migrationsskript für jede Konfigurationsdatei ausführen"
+      ansible.builtin.command: "/usr/libexec/vyos/run-config-migration.py /opt/configs/{{ item }}"
+      loop: "{{ hostvars[inventory_hostname].config_files_to_migrate }}"
+      when: hostvars[inventory_hostname].config_files_to_migrate is defined and hostvars[inventory_hostname].config_files_to_migrate | length > 0
+      become: true
+
+# # ==============================================================================
+# # Play 3: Zurückholen der migrierten Dateien via SSH
+# # - Holt die bearbeiteten Dateien von /opt/configs zurück.
+# # - Speichert sie im lokalen Ordner /configs-migrated.
+# # ==============================================================================
+- name: "Play 3/3: Migrierte Konfigurationsdateien vom Ziel-Host zurückholen"
+  hosts: migrating-host
+  connection: ssh
+  port: 9999
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: "3.1: Alle migrierten Dateien vom Host abrufen und in /configs-migrated speichern"
+      ansible.builtin.fetch:
+        src: "/opt/configs/{{ item }}"
+        dest: "{{ playbook_dir }}/../configs-migrated/{{ item | regex_replace('\\.boot$', '') }}/"
+        flat: true
+      loop: "{{ hostvars[inventory_hostname].config_files_to_migrate }}" 
+      when: hostvars[inventory_hostname].config_files_to_migrate is defined and hostvars[inventory_hostname].config_files_to_migrate | length > 0
+
+
+# ==============================================================================
+# Play 4: 'vyos-config-to-commands' für jede Datei ausführen und Ergebnis sichern
+# ==============================================================================
+- name: "Play 4/4: vyos-config-to-commands ausführen und Ausgabe lokal speichern"
+  hosts: migrating-host
+  connection: ssh
+  port: 9999
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: "4.1: vyos-config-to-commands ausführen und Ergebnis speichern"
+      ansible.builtin.shell: "vyos-config-to-commands /opt/configs/{{ item }}"
+      register: command_output
+      loop: "{{ hostvars[inventory_hostname].config_files_to_migrate }}"
+      when: hostvars[inventory_hostname].config_files_to_migrate is defined and hostvars[inventory_hostname].config_files_to_migrate | length > 0
+      changed_when: false
+
+    - name: "4.2: Sicherstellen, dass der Zielordner für jede Datei existiert"
+      file:
+        path: "{{ playbook_dir }}/../setfiles-migrated/{{ cleaned_hostname }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: false
+      become: false
+      loop: "{{ command_output.results }}"
+      vars:
+        cleaned_hostname: "{{ item.item | regex_replace('\\.boot$', '') }}"
+
+
+
+    - name: "4.3: Ausgaben lokal unter setfiles-migrated/<hostname>/<hostname>-set.cfg speichern"
+      delegate_to: localhost
+      run_once: false
+      vars:
+        cleaned_hostname: "{{ item.item | regex_replace('\\.boot$', '') }}"
+      ansible.builtin.copy:
+        content: "{{ item.stdout }}"
+        dest: "{{ playbook_dir }}/../setfiles-migrated/{{ cleaned_hostname }}/{{ cleaned_hostname }}-set.cfg"
+        mode: '0644'
+      loop: "{{ command_output.results }}"
+      become: false
