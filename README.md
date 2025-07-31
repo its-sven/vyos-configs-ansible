@@ -23,14 +23,15 @@ Ansible playbooks to manage VyOS infrastructure: export host configurations, mig
 
 # Parses migrated set-configs in 'setfiles-migrated', extracts data, and writes a 'report.csv'
 ./run-playbook.sh playbooks/parse_migrated_configs.yml
-
+```
 
 ## Requirements
 
 - Ansible v2.10+ 
-```
+
 brew install ansible
 
+```bash
 # Optional: for password-based SSH
 # brew install esolitos/ipa/sshpass
 
@@ -44,7 +45,7 @@ Copy the `.env_example` file to `.env' and add your password profiles.
 cp .env_example .env
 ```
 
-_The '.env' file is git-ignored and will not be tracked._
+_The `.env` file is git-ignored and will not be tracked._
 
 
 ## Troubleshooting
